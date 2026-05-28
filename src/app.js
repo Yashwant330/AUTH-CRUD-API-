@@ -1,9 +1,68 @@
 import express from 'express';
 import NoteModel from '../models/notes.model.js';
+import mongoose from 'mongoose';
+import userModel from './config/users.models.js';
+import cookies from 'cookie-parser';
 
 
 let app = express()
 app.use(express.json())
+app.use(cookies())
+
+/**
+ * @Routes POST/api/auth/register
+ * @description Register a new user need name n email in request body
+ * @access Public
+ */
+
+app.post("/api/auth/register",async(req,res)=>{
+    const {name,email}=req.body;
+
+    if(!name)
+    {
+        return res.status(400).json({
+            Error:"Name is required"
+        })
+    }
+
+        if(!email)
+    {
+        return res.status(400).json({
+            Error:"Email is required"
+        })
+    }
+
+     if(name.trim().length<3)
+    {
+        return res.status(400).json({
+            error:"name must be atleast 4 characters long"
+        })
+    }
+
+   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+ 
+   if(!emailRegex.test(email))
+   {
+    return res.status(400).json({
+        error:"Invalid email form"
+    })
+   }
+
+   //--if all validation success create user
+
+   const newUser= await userModel.create({name,email})
+
+  const token = JSON.stringify({id:newUser._id,email:newUser.email})
+
+   res.cookie("token",token)
+
+   return res.status(200).json({
+    message:"User registered successfully",
+    user:newUser
+   })
+
+}) 
+
 
 
 /**
