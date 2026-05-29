@@ -1,201 +1,365 @@
 import express from 'express';
-import NoteModel from '../models/notes.model.js';
 import mongoose from 'mongoose';
-import userModel from './config/users.models.js';
-import cookies from 'cookie-parser';
+import cookieParser from 'cookie-parser';
+
+import NoteModel from '../models/notes.model.js';
+import userModel from '../models/users.models.js';
+
+const app = express();
+
+app.use(express.json());
+app.use(cookieParser());
 
 
-let app = express()
-app.use(express.json())
-app.use(cookies())
 
 /**
- * @Routes POST/api/auth/register
- * @description Register a new user need name n email in request body
- * @access Public
+ * @ROUTE POST /api/auth/register
+ * @DESCRIPTION Register user
+ * @ACCESS Public
  */
 
-app.post("/api/auth/register",async(req,res)=>{
-    const {name,email}=req.body;
+app.post('/api/auth/register', async (req, res) => {
 
-    if(!name)
-    {
-        return res.status(400).json({
-            Error:"Name is required"
-        })
+    try {
+
+        const { name, email } = req.body;
+
+        // validations
+
+        if (!name) {
+            return res.status(400).json({
+                error: "Name is required"
+            });
+        }
+
+        if (!email) {
+            return res.status(400).json({
+                error: "Email is required"
+            });
+        }
+
+        if (name.trim().length < 3) {
+            return res.status(400).json({
+                error: "Name must be at least 3 characters long"
+            });
+        }
+
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+        if (!emailRegex.test(email)) {
+            return res.status(400).json({
+                error: "Invalid email format"
+            });
+        }
+
+        // check existing user
+
+        const existingUser = await userModel.findOne({ email });
+
+        if (existingUser) {
+            return res.status(400).json({
+                error: "User already exists"
+            });
+        }
+
+        // create user
+
+        const newUser = await userModel.create({
+            name,
+            email
+        });
+
+        // create token
+
+        const token = JSON.stringify({
+            id: newUser._id,
+            email: newUser.email
+        },process.env.JWT_SECRET);
+
+        // store token in cookies
+
+        res.cookie("token", token, {
+            httpOnly: true
+        });
+
+        return res.status(201).json({
+            message: "User registered successfully",
+            user: newUser
+        });
+
+    } catch (error) {
+
+        console.log(error);
+
+        return res.status(500).json({
+            error: "Internal server error"
+        });
     }
 
-        if(!email)
-    {
-        return res.status(400).json({
-            Error:"Email is required"
-        })
-    }
-
-     if(name.trim().length<3)
-    {
-        return res.status(400).json({
-            error:"name must be atleast 4 characters long"
-        })
-    }
-
-   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
- 
-   if(!emailRegex.test(email))
-   {
-    return res.status(400).json({
-        error:"Invalid email form"
-    })
-   }
-
-   //--if all validation success create user
-
-   const newUser= await userModel.create({name,email})
-
-  const token = JSON.stringify({id:newUser._id,email:newUser.email})
-
-   res.cookie("token",token)
-
-   return res.status(200).json({
-    message:"User registered successfully",
-    user:newUser
-   })
-
-}) 
-
+});
 
 
 /**
- * @route POST/api/notes
- * @description Create a new note need title and description in request body
- * @access Public
+ * @ROUTE GET /api/auth/me
+ * @DESCRIPTION Get logged in user
+ * @ACCESS Private
  */
 
-app.post("/api/notes", async (req,res)=>{
-    const{title,description} = req.body;
+app.get('/api/auth/me', async (req, res) => {
 
+    try {
 
-    if(!title)
-    {
-        return res.status(400).json({error:"Title is required"})
+        const token = req.cookies.token;
 
+        if (!token) {
+            return res.status(401).json({
+                error: "Unauthorized"
+            });
+        }
+
+        const decoded = JSON.parse(token);
+
+        const user = await userModel.findById(decoded.id);
+
+        if (!user) {
+            return res.status(404).json({
+                error: "User not found"
+            });
+        }
+
+        return res.status(200).json({
+            message: "Current User",
+            user
+        });
+
+    } catch (error) {
+
+        console.log(error);
+
+        return res.status(500).json({
+            error: "Internal server error"
+        });
     }
 
-    if(!description)
-    {
-        return res.status(400).json({
-         error:"Description is required"
-        })
-    }
-
-    if(title.trim().length<3)
-    {
-        return res.status(400).json({
-            error:"Title must be atleast 4 characters long"
-        })
-    }
-
-      if(description.trim().length<4)
-    {
-        return res.status(400).json({
-            error:"description must be atleast 4 characters long"
-        })
-    }
-
-// ----- If validation passes,createthe note----
-
-const newNote = await NoteModel.create({title,description})
+});
 
 
-return res.status(201).json({
-    Message:"Note created successfully", 
-    newNote});
 
-})
 
 
 /**
- * @Routes POST/api/notes
- * @description to read or fetch from api
- * @access Public
+ * @ROUTE POST /api/notes
+ * @DESCRIPTION Create note
+ * @ACCESS Private
  */
 
-app.get('/api/notes', async (req,res)=>{
+app.post('/api/notes', async (req, res) => {
 
-    const notes = await NoteModel.find();
-    
-    return res.status(200).json({
-        Message:"Notes",
-        notes});
-})
+    try {
+
+        const { title, description } = req.body;
+
+        // get token from cookies
+
+        const token = req.cookies.token;
+
+        if (!token) {
+            return res.status(401).json({
+                error: "Unauthorized"
+            });
+        }
+
+        // convert token string to object
+
+         
+         const user=jwt.verify(token,process.env.JWT_SECRET);
+
+
+        req.user = user;
+
+        console.log("Logged In User:", req.user);
+
+        // validations
+
+        if (!title) {
+            return res.status(400).json({
+                error: "Title is required"
+            });
+        }
+
+        if (!description) {
+            return res.status(400).json({
+                error: "Description is required"
+            });
+        }
+
+        if (title.trim().length < 3) {
+            return res.status(400).json({
+                error: "Title must be at least 3 characters long"
+            });
+        }
+
+        if (description.trim().length < 4) {
+            return res.status(400).json({
+                error: "Description must be at least 4 characters long"
+            });
+        }
+
+        // create note
+
+        const newNote = await NoteModel.create({
+            title,
+            description,
+            user: req.user.email
+        });
+
+        return res.status(201).json({
+            message: "Note created successfully",
+            note: newNote
+        });
+
+    } catch (error) {
+
+        console.log(error);
+
+        return res.status(500).json({
+            error: "Internal server error"
+        });
+    }
+
+});
+
 
 /**
- * @Route PATCH/api/notes/:id
- * @description Update a note by id
- * @access Public
+ * @ROUTE GET /api/notes
+ * @DESCRIPTION Get all notes
+ * @ACCESS Private
+ */
+
+app.get('/api/notes', async (req, res) => {
+
+    try {
+
+        const token = req.cookies.token;
+
+        if (!token) {
+            return res.status(401).json({
+                error: "Unauthorized"
+            });
+        }
+
+        const user = JSON.parse(token);
+
+        const notes = await NoteModel.find({
+            user: user.email
+        });
+
+        return res.status(200).json({
+            message: "Notes fetched successfully",
+            notes
+        });
+
+    } catch (error) {
+
+        console.log(error);
+
+        return res.status(500).json({
+            error: "Internal server error"
+        });
+    }
+
+});
+
+
+/**
+ * @ROUTE PATCH /api/notes/:id
+ * @DESCRIPTION Update note
+ * @ACCESS Private
  */
 
 app.patch('/api/notes/:id', async (req, res) => {
-    const { id } = req.params;
-    const { description } = req.body;
 
-    if (!description) {
-        return res.status(400).json({
-            error: "Description is required"
+    try {
+
+        const { id } = req.params;
+        const { description } = req.body;
+
+        if (!description) {
+            return res.status(400).json({
+                error: "Description is required"
+            });
+        }
+
+        if (description.trim().length < 4) {
+            return res.status(400).json({
+                error: "Description must be at least 4 characters long"
+            });
+        }
+
+        const note = await NoteModel.findById(id);
+
+        if (!note) {
+            return res.status(404).json({
+                error: "Note not found"
+            });
+        }
+
+        note.description = description;
+
+        await note.save();
+
+        return res.status(200).json({
+            message: "Note updated successfully",
+            note
+        });
+
+    } catch (error) {
+
+        console.log(error);
+
+        return res.status(500).json({
+            error: "Internal server error"
         });
     }
 
-    if (description.trim().length < 4) {
-        return res.status(400).json({
-            error: "Description must be at least 4 characters long"
-        });
-    }
-
-    const note = await NoteModel.findById(id);
-
-    if (!note) {
-        return res.status(404).json({
-            error: "Note not found"
-        });
-    }
-
-    note.description = description;
-    await note.save();
-
-    return res.status(200).json({
-        message: "Note updated successfully",
-        note
-    });
 });
+
 
 /**
-
-* @Route DELETE /api/notes/:id
-* @description Delete a note by id
-* @access Public
-  */
+ * @ROUTE DELETE /api/notes/:id
+ * @DESCRIPTION Delete note
+ * @ACCESS Private
+ */
 
 app.delete('/api/notes/:id', async (req, res) => {
-const { id } = req.params;
 
+    try {
 
-const note = await NoteModel.findById(id);
+        const { id } = req.params;
 
-if (!note) {
-    return res.status(404).json({
-        error: "Note not found"
-    });
-}
+        const note = await NoteModel.findById(id);
 
-await NoteModel.findByIdAndDelete(id);
+        if (!note) {
+            return res.status(404).json({
+                error: "Note not found"
+            });
+        }
 
-return res.status(200).json({
-    message: "Note deleted successfully"
+        await NoteModel.findByIdAndDelete(id);
+
+        return res.status(200).json({
+            message: "Note deleted successfully"
+        });
+
+    } catch (error) {
+
+        console.log(error);
+
+        return res.status(500).json({
+            error: "Internal server error"
+        });
+    }
+
 });
-
-
-});
-
-
 
 export default app;
