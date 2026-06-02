@@ -1,7 +1,8 @@
 import express from 'express';
-import mongoose from 'mongoose';
 import cookieParser from 'cookie-parser';
+import jwt from 'jsonwebtoken';
 
+import { authMiddleware } from './middleware/auth.middleware.js';
 import NoteModel from '../models/notes.model.js';
 import userModel from '../models/users.models.js';
 
@@ -10,356 +11,305 @@ const app = express();
 app.use(express.json());
 app.use(cookieParser());
 
+/**
 
+* REGISTER
+  */
+  app.post('/api/auth/register', async (req, res) => {
+  try {
+  const { name, email, password } = req.body;
+
+  ```
+   if (!name || !email || !password) {
+       return res.status(400).json({
+           error: 'All fields are required'
+       });
+   }
+
+   const existingUser = await userModel.findOne({ email });
+
+   if (existingUser) {
+       return res.status(400).json({
+           error: 'User already exists'
+       });
+   }
+
+   const user = await userModel.create({
+       name,
+       email,
+       password
+   });
+
+   const token = jwt.sign(
+       {
+           id: user._id,
+           email: user.email
+       },
+       process.env.JWT_SECRET
+   );
+
+   res.cookie('token', token, {
+       httpOnly: true
+   });
+
+   return res.status(201).json({
+       message: 'User registered successfully',
+       user
+   });
+  ```
+
+  } catch (error) {
+  console.log(error);
+
+  ```
+   return res.status(500).json({
+       error: 'Internal server error'
+   });
+  ```
+
+  }
+  });
 
 /**
- * @ROUTE POST /api/auth/register
- * @DESCRIPTION Register user
- * @ACCESS Public
- */
 
-app.post('/api/auth/register', async (req, res) => {
+* LOGIN
+  */
+  app.post('/api/auth/login', async (req, res) => {
+  try {
+  const { email, password } = req.body;
 
-    try {
+  ```
+   if (!email || !password) {
+       return res.status(400).json({
+           error: 'Email and password are required'
+       });
+   }
 
-        const { name, email } = req.body;
+   const user = await userModel.findOne({ email });
 
-        // validations
+   if (!user) {
+       return res.status(404).json({
+           error: 'User not found'
+       });
+   }
 
-        if (!name) {
-            return res.status(400).json({
-                error: "Name is required"
-            });
-        }
+   const isMatch = await user.matchPassword(password);
 
-        if (!email) {
-            return res.status(400).json({
-                error: "Email is required"
-            });
-        }
+   if (!isMatch) {
+       return res.status(401).json({
+           error: 'Invalid credentials'
+       });
+   }
 
-        if (name.trim().length < 3) {
-            return res.status(400).json({
-                error: "Name must be at least 3 characters long"
-            });
-        }
+   const token = jwt.sign(
+       {
+           id: user._id,
+           email: user.email
+       },
+       process.env.JWT_SECRET
+   );
 
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+   res.cookie('token', token, {
+       httpOnly: true
+   });
 
-        if (!emailRegex.test(email)) {
-            return res.status(400).json({
-                error: "Invalid email format"
-            });
-        }
+   return res.status(200).json({
+       message: 'Login successful',
+       user
+   });
+  ```
 
-        // check existing user
+  } catch (error) {
+  console.log(error);
 
-        const existingUser = await userModel.findOne({ email });
+  ```
+   return res.status(500).json({
+       error: 'Internal server error'
+   });
+  ```
 
-        if (existingUser) {
-            return res.status(400).json({
-                error: "User already exists"
-            });
-        }
-
-        // create user
-
-        const newUser = await userModel.create({
-            name,
-            email
-        });
-
-        // create token
-
-        const token = JSON.stringify({
-            id: newUser._id,
-            email: newUser.email
-        },process.env.JWT_SECRET);
-
-        // store token in cookies
-
-        res.cookie("token", token, {
-            httpOnly: true
-        });
-
-        return res.status(201).json({
-            message: "User registered successfully",
-            user: newUser
-        });
-
-    } catch (error) {
-
-        console.log(error);
-
-        return res.status(500).json({
-            error: "Internal server error"
-        });
-    }
-
-});
-
+  }
+  });
 
 /**
- * @ROUTE GET /api/auth/me
- * @DESCRIPTION Get logged in user
- * @ACCESS Private
- */
 
-app.get('/api/auth/me', async (req, res) => {
+* CURRENT USER
+  */
+  app.get('/api/auth/me', authMiddleware, async (req, res) => {
+  try {
+  const user = await userModel.findById(req.user.id);
 
-    try {
+  ```
+   if (!user) {
+       return res.status(404).json({
+           error: 'User not found'
+       });
+   }
 
-        const token = req.cookies.token;
+   return res.status(200).json({
+       user
+   });
+  ```
 
-        if (!token) {
-            return res.status(401).json({
-                error: "Unauthorized"
-            });
-        }
+  } catch (error) {
+  console.log(error);
 
-        const decoded = JSON.parse(token);
+  ```
+   return res.status(500).json({
+       error: 'Internal server error'
+   });
+  ```
 
-        const user = await userModel.findById(decoded.id);
-
-        if (!user) {
-            return res.status(404).json({
-                error: "User not found"
-            });
-        }
-
-        return res.status(200).json({
-            message: "Current User",
-            user
-        });
-
-    } catch (error) {
-
-        console.log(error);
-
-        return res.status(500).json({
-            error: "Internal server error"
-        });
-    }
-
-});
-
-
-
-
+  }
+  });
 
 /**
- * @ROUTE POST /api/notes
- * @DESCRIPTION Create note
- * @ACCESS Private
- */
 
-app.post('/api/notes', async (req, res) => {
+* CREATE NOTE
+  */
+  app.post('/api/notes', authMiddleware, async (req, res) => {
+  try {
+  const { title, description } = req.body;
 
-    try {
+  ```
+   if (!title || !description) {
+       return res.status(400).json({
+           error: 'Title and description are required'
+       });
+   }
 
-        const { title, description } = req.body;
+   const note = await NoteModel.create({
+       title,
+       description,
+       user: req.user.email
+   });
 
-        // get token from cookies
+   return res.status(201).json({
+       message: 'Note created successfully',
+       note
+   });
+  ```
 
-        const token = req.cookies.token;
+  } catch (error) {
+  console.log(error);
 
-        if (!token) {
-            return res.status(401).json({
-                error: "Unauthorized"
-            });
-        }
+  ```
+   return res.status(500).json({
+       error: 'Internal server error'
+   });
+  ```
 
-        // convert token string to object
-
-         
-         const user=jwt.verify(token,process.env.JWT_SECRET);
-
-
-        req.user = user;
-
-        console.log("Logged In User:", req.user);
-
-        // validations
-
-        if (!title) {
-            return res.status(400).json({
-                error: "Title is required"
-            });
-        }
-
-        if (!description) {
-            return res.status(400).json({
-                error: "Description is required"
-            });
-        }
-
-        if (title.trim().length < 3) {
-            return res.status(400).json({
-                error: "Title must be at least 3 characters long"
-            });
-        }
-
-        if (description.trim().length < 4) {
-            return res.status(400).json({
-                error: "Description must be at least 4 characters long"
-            });
-        }
-
-        // create note
-
-        const newNote = await NoteModel.create({
-            title,
-            description,
-            user: req.user.email
-        });
-
-        return res.status(201).json({
-            message: "Note created successfully",
-            note: newNote
-        });
-
-    } catch (error) {
-
-        console.log(error);
-
-        return res.status(500).json({
-            error: "Internal server error"
-        });
-    }
-
-});
-
+  }
+  });
 
 /**
- * @ROUTE GET /api/notes
- * @DESCRIPTION Get all notes
- * @ACCESS Private
- */
 
-app.get('/api/notes', async (req, res) => {
+* GET NOTES
+  */
+  app.get('/api/notes', authMiddleware, async (req, res) => {
+  try {
+  const notes = await NoteModel.find({
+  user: req.user.email
+  });
 
-    try {
+  ```
+   return res.status(200).json({
+       notes
+   });
+  ```
 
-        const token = req.cookies.token;
+  } catch (error) {
+  console.log(error);
 
-        if (!token) {
-            return res.status(401).json({
-                error: "Unauthorized"
-            });
-        }
+  ```
+   return res.status(500).json({
+       error: 'Internal server error'
+   });
+  ```
 
-        const user = JSON.parse(token);
-
-        const notes = await NoteModel.find({
-            user: user.email
-        });
-
-        return res.status(200).json({
-            message: "Notes fetched successfully",
-            notes
-        });
-
-    } catch (error) {
-
-        console.log(error);
-
-        return res.status(500).json({
-            error: "Internal server error"
-        });
-    }
-
-});
-
+  }
+  });
 
 /**
- * @ROUTE PATCH /api/notes/:id
- * @DESCRIPTION Update note
- * @ACCESS Private
- */
 
-app.patch('/api/notes/:id', async (req, res) => {
+* UPDATE NOTE
+  */
+  app.patch('/api/notes/:id', authMiddleware, async (req, res) => {
+  try {
+  const { id } = req.params;
+  const { description } = req.body;
 
-    try {
+  ```
+   const note = await NoteModel.findOne({
+       _id: id,
+       user: req.user.email
+   });
 
-        const { id } = req.params;
-        const { description } = req.body;
+   if (!note) {
+       return res.status(404).json({
+           error: 'Note not found'
+       });
+   }
 
-        if (!description) {
-            return res.status(400).json({
-                error: "Description is required"
-            });
-        }
+   note.description = description;
 
-        if (description.trim().length < 4) {
-            return res.status(400).json({
-                error: "Description must be at least 4 characters long"
-            });
-        }
+   await note.save();
 
-        const note = await NoteModel.findById(id);
+   return res.status(200).json({
+       message: 'Note updated successfully',
+       note
+   });
+  ```
 
-        if (!note) {
-            return res.status(404).json({
-                error: "Note not found"
-            });
-        }
+  } catch (error) {
+  console.log(error);
 
-        note.description = description;
+  ```
+   return res.status(500).json({
+       error: 'Internal server error'
+   });
+  ```
 
-        await note.save();
-
-        return res.status(200).json({
-            message: "Note updated successfully",
-            note
-        });
-
-    } catch (error) {
-
-        console.log(error);
-
-        return res.status(500).json({
-            error: "Internal server error"
-        });
-    }
-
-});
-
+  }
+  });
 
 /**
- * @ROUTE DELETE /api/notes/:id
- * @DESCRIPTION Delete note
- * @ACCESS Private
- */
 
-app.delete('/api/notes/:id', async (req, res) => {
+* DELETE NOTE
+  */
+  app.delete('/api/notes/:id', authMiddleware, async (req, res) => {
+  try {
+  const { id } = req.params;
 
-    try {
+  ```
+   const note = await NoteModel.findOne({
+       _id: id,
+       user: req.user.email
+   });
 
-        const { id } = req.params;
+   if (!note) {
+       return res.status(404).json({
+           error: 'Note not found'
+       });
+   }
 
-        const note = await NoteModel.findById(id);
+   await NoteModel.findByIdAndDelete(id);
 
-        if (!note) {
-            return res.status(404).json({
-                error: "Note not found"
-            });
-        }
+   return res.status(200).json({
+       message: 'Note deleted successfully'
+   });
+  ```
 
-        await NoteModel.findByIdAndDelete(id);
+  } catch (error) {
+  console.log(error);
 
-        return res.status(200).json({
-            message: "Note deleted successfully"
-        });
+  ```
+   return res.status(500).json({
+       error: 'Internal server error'
+   });
+  ```
 
-    } catch (error) {
-
-        console.log(error);
-
-        return res.status(500).json({
-            error: "Internal server error"
-        });
-    }
-
-});
+  }
+  });
 
 export default app;
